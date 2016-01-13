@@ -272,6 +272,12 @@ class DefaultChooser(object):
 
         hypers = hypers if hypers is not None else defaultdict(dict)
 
+        if hypers:
+            print "\n".join([("%s = (%s)%s" % (str(k), str(type(v)), str(v)))
+                             for k, v in sorted(hypers.items())])
+        else:
+            print "no hypers yet"
+
         # print 'Fittings tasks: %s' % str(task_group.tasks.keys())
 
         for task_name, task in task_group.tasks.iteritems():
@@ -302,6 +308,10 @@ class DefaultChooser(object):
                 vals = data_dict['values'] if data_dict.has_key('values') else data_dict['counts']
 
                 sys.stderr.write('Fitting %s for %s task...\n' % (model_class, task_name))
+                print data_dict['inputs']
+                print vals
+                print data_dict['pending']
+                print hypers.get(task_name, None)
                 new_hypers[task_name] = self.models[task_name].fit(
                     data_dict['inputs'],
                     vals,

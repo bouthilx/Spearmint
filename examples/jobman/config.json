@@ -1,0 +1,52 @@
+{
+    "language"         : "PYTHON",
+    "main_file"        : "jobman_example.py",
+    "experiment_name"  : "basic9_jobman_example",
+    "scheduler"        : "jobdispatch",
+    "username"         : "bouthilx",
+    "polling_time"     : 60,
+    "max_concurrent"   : 50,
+    "max_finished_jobs": 1000,
+    "database"         : {
+        "type"      : "jobmandb",
+        "address"   : "opter.iro.umontreal.ca",
+        "name"      : "bouthilx_db",
+        "username"  : "bouthilx",
+        "password"  : "69fc5bd5b0"
+    },
+    "clusters"      : {
+        "briaree": {
+            "root"  : "/RQexec/bouthilx/spearmint/jobman",
+            "max_running" : 100,
+            "max_queued"  : -1
+        },
+        "hades": {
+            "root"  : "/RQexec/bouthilx/spearmint/jobman",
+            "max_running" : 30,
+            "max_queued"  : 63
+        }
+    },
+    "duree" : "0:03:0",
+    "mem"   : "2G",
+    "env"   : "THEANO_FLAGS=device=cpu,floatX=float32,force_device=True",
+    "tasks": {
+        "result": {
+            "type": "OBJECTIVE",
+            "likelihood": "NOISELESS"
+        }
+    },
+    "variables" : {
+        "x" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5,
+            "max"  : 10
+        },
+        "y" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 15
+        }
+    }
+}

@@ -182,6 +182,7 @@
 # to enter into this License and Terms of Use on behalf of itself and
 # its Institution.
 
+import logging
 import sys
 import optparse
 import importlib
@@ -195,13 +196,15 @@ except ImportError: import json
 
 from collections import OrderedDict
 
-from spearmint.utils.database.mongodb import MongoDB
-from spearmint.tasks.task_group       import TaskGroup
+from spearmint.utils.database import database_factory
+from spearmint.tasks.task_group import TaskGroup
 
 from spearmint.resources.resource import parse_resources_from_config
 from spearmint.resources.resource import print_resources_status
 
 from spearmint.utils.parsing import parse_db_address
+
+LOGGING_FORMAT = "%(asctime)-15s %(levelname)s:%(name)s:%(filename)-20s %(message)s"
 
 def get_options():
     parser = optparse.OptionParser(usage="usage: %prog [options] directory")
@@ -210,7 +213,14 @@ def get_options():
                       help="Configuration file name.",
                       type="string", default="config.json")
 
+    parser.add_option("-v", "--verbose",
+                      action="store_true", dest="verbose", default=False,
+                      help="explain wwhat is being done")
+
     (commandline_kwargs, args) = parser.parse_args()
+
+    if commandline_kwargs.verbose:
+        logging.basicConfig(level=logging.DEBUG, format=LOGGING_FORMAT)
 
     # Read in the config file
     expt_dir  = os.path.realpath(os.path.expanduser(args[0]))
@@ -234,7 +244,7 @@ def get_options():
     # Set DB address
     db_address = parse_db_address(options)
     if 'database' not in options:
-        options['database'] = {'name': 'spearmint', 'address': db_address}
+        options['database'] = {'type': 'mongodb', 'name': 'spearmint', 'address': db_address}
     else:
         options['database']['address'] = db_address
 
@@ -253,12 +263,12 @@ def main():
     # Load up the chooser.
     chooser_module = importlib.import_module('spearmint.choosers.' + options['chooser'])
     chooser = chooser_module.init(options)
-    experiment_name     = options.get("experiment-name", 'unnamed-experiment')
+    experiment_name     = options.get("experiment_name", 'unnamed_experiment')
 
     # Connect to the database
     db_address = options['database']['address']
-    sys.stderr.write('Using database at %s.\n' % db_address)        
-    db         = MongoDB(database_address=db_address)
+    sys.stderr.write('Using database at %s.\n' % db_address)
+    db = database_factory(options)
     
     while True:
 
@@ -273,29 +283,31 @@ def main():
             # Note: I chose to fill up one resource and them move on to the next
             # You could also do it the other way, by changing "while" to "if" here
 
+            print resource.numPending(jobs)
+
             while resource.acceptingJobs(jobs):
 
-                # Load jobs from DB 
+                # Load jobs from DB
                 # (move out of one or both loops?) would need to pass into load_tasks
                 jobs = load_jobs(db, experiment_name)
-                
+
                 # Remove any broken jobs from pending.
                 remove_broken_jobs(db, jobs, experiment_name, resources)
 
                 # Get a suggestion for the next job
                 suggested_job = get_suggestion(chooser, resource.tasks, db, expt_dir, options, resource_name)
-    
+
                 # Submit the job to the appropriate resource
                 process_id = resource.attemptDispatch(experiment_name, suggested_job, db_address, expt_dir)
 
                 # Set the status of the job appropriately (successfully submitted or not)
                 if process_id is None:
-                    suggested_job['status'] = 'broken'
-                    save_job(suggested_job, db, experiment_name)
+                    suggested_job['proc_status'] = 'broken'
+                    suggested_job = save_job(suggested_job, db, experiment_name)
                 else:
-                    suggested_job['status'] = 'pending'
+                    suggested_job['proc_status'] = 'pending'
                     suggested_job['proc_id'] = process_id
-                    save_job(suggested_job, db, experiment_name)
+                    suggested_job = save_job(suggested_job, db, experiment_name)
 
                 jobs = load_jobs(db, experiment_name)
 
@@ -306,7 +318,8 @@ def main():
         # If no resources are accepting jobs, sleep
         # (they might be accepting if suggest takes a while and so some jobs already finished by the time this point is reached)
         if tired(db, experiment_name, resources):
-            time.sleep(options.get('polling-time', 5))
+            time.sleep(options.get('polling_time', 5))
+
 
 def tired(db, experiment_name, resources):
     """
@@ -318,6 +331,7 @@ def tired(db, experiment_name, resources):
             return False
     return True
 
+
 def remove_broken_jobs(db, jobs, experiment_name, resources):
     """
     Look through jobs and for those that are pending but not alive, set
@@ -325,11 +339,15 @@ def remove_broken_jobs(db, jobs, experiment_name, resources):
     """
     if jobs:
         for job in jobs:
-            if job['status'] == 'pending':
-                if not resources[job['resource']].isJobAlive(job):
-                    sys.stderr.write('Broken job %s detected.\n' % job['id'])
-                    job['status'] = 'broken'
-                    save_job(job, db, experiment_name)
+            if job['proc_status'] == 'pending':
+                try:
+                    if not resources[job['resource']].isJobAlive(job):
+                        sys.stderr.write('Broken job %s detected.\n' % job['id'])
+                        job['proc_status'] = 'broken'
+                        job = save_job(job, db, experiment_name)
+                except AssertionError:
+                    import pdb; pdb.set_trace()
+
 
 # TODO: support decoupling i.e. task_names containing more than one task,
 #       and the chooser must choose between them in addition to choosing X
@@ -338,10 +356,10 @@ def get_suggestion(chooser, task_names, db, expt_dir, options, resource_name):
     if len(task_names) == 0:
         raise Exception("Error: trying to obtain suggestion for 0 tasks ")
 
-    experiment_name = options['experiment-name']
+    experiment_name = options['experiment_name']
 
     # We are only interested in the tasks in task_names
-    task_options = { task: options["tasks"][task] for task in task_names }
+    task_options = {task: options["tasks"][task] for task in task_names}
     # For now we aren't doing any multi-task, so the below is simpler
     # task_options = options["tasks"]
 
@@ -350,26 +368,31 @@ def get_suggestion(chooser, task_names, db, expt_dir, options, resource_name):
 
     # Load the model hypers from the database.
     hypers = load_hypers(db, experiment_name)
+    print len(hypers), hypers
 
     # "Fit" the chooser - give the chooser data and let it fit the model.
-    hypers = chooser.fit(task_group, hypers, task_options)
+    new_hypers = chooser.fit(task_group, hypers, task_options)
+
+    # force overwrite (not needed for mongodb)
+    if "id" in hypers:
+        new_hypers["id"] = hypers["id"]
 
     # Save the hyperparameters to the database.
-    save_hypers(hypers, db, experiment_name)
+    save_hypers(new_hypers, db, experiment_name)
 
     # Ask the chooser to actually pick one.
     suggested_input = chooser.suggest()
 
     # TODO: implelent this
-    suggested_task = task_names[0]  
+    suggested_task = task_names[0]
 
     # Parse out the name of the main file (TODO: move this elsewhere)
-    if "main-file" in task_options[suggested_task]:
-        main_file = task_options[suggested_task]["main-file"]
-    elif "main-file" in options:
-        main_file = options['main-file']
+    if "main_file" in task_options[suggested_task]:
+        main_file = task_options[suggested_task]["main_file"]
+    elif "main_file" in options:
+        main_file = options['main_file']
     else:
-        raise Exception("main-file not specified for task %s" % suggested_task)
+        raise Exception("main_file not specified for task %s" % suggested_task)
 
     if "language" in task_options[suggested_task]:
         language = task_options[suggested_task]["language"]
@@ -378,26 +401,20 @@ def get_suggestion(chooser, task_names, db, expt_dir, options, resource_name):
     else:
         raise Exception("language not specified for task %s" % suggested_task)
 
-
-    jobs = load_jobs(db, experiment_name)
-
-    job_id = len(jobs) + 1
-
     job = {
-        'id'          : job_id,
         'params'      : task_group.paramify(suggested_input),
         'expt_dir'    : expt_dir,
         'tasks'       : task_names,
         'resource'    : resource_name,
-        'main-file'   : main_file,
+        'main_file'   : main_file,
         'language'    : language,
-        'status'      : 'new',
-        'submit time' : time.time(),
-        'start time'  : None,
-        'end time'    : None
+        'proc_status'      : 'new',
+        'submit_time' : time.time(),
+        'start_time'  : None,
+        'end_time'    : None
     }
 
-    save_job(job, db, experiment_name)
+    job = save_job(job, db, experiment_name)
 
     return job
 
@@ -427,27 +444,31 @@ def load_jobs(db, experiment_name):
 
 def save_job(job, db, experiment_name):
     """save a job to the database"""
-    db.save(job, experiment_name, 'jobs', {'id' : job['id']})
+    return db.save(job, experiment_name, 'jobs')
 
 def load_task_group(db, options, task_names=None):
     if task_names is None:
         task_names = options['tasks'].keys()
     task_options = { task: options["tasks"][task] for task in task_names }
 
-    jobs = load_jobs(db, options['experiment-name'])
+    jobs = load_jobs(db, options['experiment_name'])
 
     task_group = TaskGroup(task_options, options['variables'])
 
     if jobs:
         task_group.inputs  = np.array([task_group.vectorify(job['params'])
-                for job in jobs if job['status'] == 'complete'])
+                for job in jobs if job['proc_status'] == 'completed'])
 
         task_group.pending = np.array([task_group.vectorify(job['params'])
-                for job in jobs if job['status'] == 'pending'])
+                for job in jobs if job['proc_status'] == 'pending'])
 
-        task_group.values  = {task : np.array([job['values'][task]
-                for job in jobs if job['status'] == 'complete'])
-                    for task in task_names}
+        try:
+            task_group.values  = {task : np.array([job['values'][task]
+                    for job in jobs if job['proc_status'] == 'completed'])
+                        for task in task_names}
+        except BaseException as e:
+            print str(e)
+            import pdb; pdb.set_trace()
 
         task_group.add_nan_task_if_nans()
 

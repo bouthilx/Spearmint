@@ -182,20 +182,23 @@
 # to enter into this License and Terms of Use on behalf of itself and
 # its Institution.
 
-import sys
-import time
 import pymongo
-import numpy.random as npr
 
-from abstractdb                  import AbstractDB
+from abstractdb import AbstractDB
 from spearmint.utils.compression import compress_nested_container, decompress_nested_container
 
+
+def init(options):
+    return MongoDB(options)
+
+
 class MongoDB(AbstractDB):
-    def __init__(self, database_address='localhost', database_name='spearmint'):
+
+    def __init__(self, options):
         try:
-            self.client = pymongo.MongoClient(database_address)
-            self.db     = self.client[database_name]
-            
+            self.client = pymongo.MongoClient(options["address"])
+            self.db = self.client[options["name"]]
+
             # Get the ID of this connection for locking.
             self.myId = self.db.last_status()['connectionId']
         except:

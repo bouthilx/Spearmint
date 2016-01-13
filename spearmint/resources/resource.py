@@ -234,8 +234,8 @@ def resource_factory(resource_name, task_names, config):
     scheduler_class  = config.get("scheduler", "local")
     scheduler_object = importlib.import_module('spearmint.schedulers.' + scheduler_class).init(config)
 
-    max_concurrent = config.get('max-concurrent', 1)
-    max_finished_jobs = config.get('max-finished-jobs', np.inf)
+    max_concurrent = config.get('max_concurrent', 1)
+    max_finished_jobs = config.get('max_finished_jobs', np.inf)
 
     return Resource(resource_name, task_names, scheduler_object, 
                     scheduler_class, max_concurrent, max_finished_jobs)
@@ -304,7 +304,7 @@ class Resource(object):
     def numPending(self, jobs):
         jobs = self.filterMyJobs(jobs)
         if jobs:
-            pending_jobs = map(lambda x: x['status'] in ['pending', 'new'], jobs)
+            pending_jobs = map(lambda x: x['proc_status'] in ['pending', 'new'], jobs)
             return reduce(add, pending_jobs, 0)
         else:
             return 0
@@ -312,7 +312,7 @@ class Resource(object):
     def numComplete(self, jobs):
         jobs = self.filterMyJobs(jobs)
         if jobs:
-            completed_jobs = map(lambda x: x['status'] == 'complete', jobs)
+            completed_jobs = map(lambda x: x['proc_status'] == 'complete', jobs)
             return reduce(add, completed_jobs, 0)
         else:
             return 0
@@ -321,11 +321,11 @@ class Resource(object):
         """Is this resource currently accepting new jobs?"""
         if self.numPending(jobs) >= self.max_concurrent:
             return False
-        
+
         if self.numComplete(jobs) >= self.max_finished_jobs:
             return False
 
-        return True 
+        return True
 
     def printStatus(self, jobs):
         sys.stderr.write("%-12s: %5d pending %5d complete\n" %

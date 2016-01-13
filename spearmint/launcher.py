@@ -231,7 +231,7 @@ def launch(db_address, experiment_name, job_id):
     db.save(job, experiment_name, 'jobs', {'id' : job_id})
 
     sys.stderr.write("Job launching after %0.2f seconds in submission.\n" 
-                     % (start_time-job['submit time']))
+                     % (start_time-job['submit_time']))
 
     success = False
 
@@ -280,15 +280,15 @@ def launch(db_address, experiment_name, job_id):
                          % (end_time-start_time, result))
         
         job['values']   = result
-        job['status']   = 'complete'
-        job['end time'] = end_time
+        job['proc_status']   = 'completed'
+        job['end_time'] = end_time
 
     else:
         sys.stderr.write("Job failed in %0.2f seconds.\n" % (end_time-start_time))
     
         # Update metadata.
-        job['status']   = 'broken'
-        job['end time'] = end_time
+        job['proc_status']   = 'broken'
+        job['end_time'] = end_time
 
     db.save(job, experiment_name, 'jobs', {'id' : job_id})
 
